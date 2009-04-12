@@ -124,6 +124,17 @@ java-pkg-2_pkg_preinst() {
 		fi
 	fi
 }
+
+# @eclass-pkg_preinst
+#
+# wrapper for java-utils-2_pkg_preinst
+# ------------------------------------------------------------------------------
+java-pkg-2_pkg_preinst() {
+	java-utils-2_pkg_preinst
+}
+
+# ------------------------------------------------------------------------------
+# @eclass-pkg_postinst
 # ------------------------------------------------------------------------------
 pre_pkg_postinst() {
 	java-pkg_reg-cachejar_

@@ -6,7 +6,7 @@
 #
 # Licensed under the GNU General Public License, v2
 #
-# $Header: /var/cvsroot/gentoo-x86/eclass/java-utils-2.eclass,v 1.121 2009/02/11 16:13:38 betelgeuse Exp $
+# $Header: /var/cvsroot/gentoo-x86/eclass/java-utils-2.eclass,v 1.126 2009/03/31 19:19:20 betelgeuse Exp $
 
 # -----------------------------------------------------------------------------
 # @eclass-begin
@@ -23,7 +23,7 @@
 #
 # -----------------------------------------------------------------------------
 
-inherit check-reqs eutils flag-o-matic multilib versionator
+inherit eutils flag-o-matic check-reqs versionator multilib
 
 IUSE="elibc_FreeBSD"
 
@@ -433,6 +433,7 @@ java-pkg_regjar() {
 				eerror "has * in it. If you want it to glob in"
 				eerror '${D} add ${D} to the argument.'
 			fi
+			debug-print "${jar} or ${D}${jar} not found"
 			die "${jar} does not exist"
 		fi
 	done
@@ -1876,6 +1877,9 @@ ejunit() {
 # ------------------------------------------------------------------------------
 
 java-utils-2_src_prepare() {
+	[[ ${EBUILD_PHASE} == prepare ]] &&
+		java-pkg_func-exists java_prepare && java_prepare
+
 	# Remember that eant will call this unless called via Portage
 	if [[ ! -e "${T}/java-utils-2_src_prepare-run" ]] && is-java-strict; then
 		echo "Searching for bundled jars:"
@@ -1885,6 +1889,33 @@ java-utils-2_src_prepare() {
 		echo "Search done."
 	fi
 	touch "${T}/java-utils-2_src_prepare-run"
+}
+
+# ------------------------------------------------------------------------------
+# @eclass-pkg_preinst
+#
+# pkg_preinst Searches for missing and unneeded dependencies
+# Don't call directly, but via java-pkg-2_pkg_preinst!
+# ------------------------------------------------------------------------------
+
+java-utils-2_pkg_preinst() {
+	if is-java-strict; then
+		if has_version dev-java/java-dep-check; then
+			[[ -e "${JAVA_PKG_ENV}" ]] || return
+			local output=$(GENTOO_VM= java-dep-check --image "${D}" "${JAVA_PKG_ENV}")
+			if [[ ${output} && has_version <=dev-java/java-dep-check-0.2 ]]; then
+				ewarn "Possibly unneeded dependencies found in package.env:"
+				for dep in ${output}; do
+					ewarn "\t${dep}"
+				done
+			fi
+			if [[ ${output} && has_version >dev-java/java-dep-check-0.2 ]]; then
+				ewarn "${output}"
+			fi
+		else
+			eerror "Install dev-java/java-dep-check for dependency checking"
+		fi
+	fi
 }
 
 # ------------------------------------------------------------------------------
@@ -2485,11 +2516,7 @@ java-pkg_expand_dir_() {
 # @return 1 - function is undeclared
 # ------------------------------------------------------------------------------
 java-pkg_func-exists() {
-	if [[ -n "$(declare -f ${1})" ]]; then
-		return 0
-	else
-		return 1
-	fi
+	declare -F ${1} > /dev/null
 }
 
 # ------------------------------------------------------------------------------
@@ -2613,6 +2640,7 @@ java-pkg_switch-vm() {
 			die "java-pkg_javac-args failed"
 		fi
 		[[ -n ${JAVACFLAGS_EXTRA} ]] && JAVACFLAGS="${JAVACFLAGS_EXTRA} ${JAVACFLAGS}"
+
 		export JAVACFLAGS
 
 		export JAVA_HOME="$(java-config -g JAVA_HOME)"
