@@ -2674,6 +2674,7 @@ java-pkg_gcjflags() {
 	OPTIMIZE_CFLAGS=${CFLAGS}
 	strip-flags
 	filter-flags "-ftree-loop-distribution -ftree-vectorize"
+	filter-flags "-D*"
 	replace-flags "-O?" "-O0"
 	append-flags -w
 
@@ -3153,7 +3154,13 @@ java-pkg_cachejar_() {
 			fi
 		done
 
-		to="$(dirname ${jar})/lib$(basename ${jar}).so"
+		to="$(dirname ${jar})/../$(get_libdir)/lib$(basename ${jar}).so"
+		if is_final_abi; then
+			echo ln -s "${D}$(dirname ${jar})" "${D}$(dirname ${to})"
+			ln -s lib "${D}$(dirname ${to})"
+		else
+			mkdir -p "${D}$(dirname ${to})"
+		fi
 		if [[ ( -f "${D}${jar}" ) && ( ".jar" == "${jar: -4:4}" ) && ( ! -e "${D}${to}" ) ]] ; then
 			echo ${GCJ} ${JAVA_PKG_NATIVE_CACHE_FLAGS} \
 				-g0 ${CFLAGS} -o ${to} ${jar}
@@ -3186,7 +3193,7 @@ java-pkg_reg-cachejar_() {
 
 	local jar to
 	for jar in ${JAVA_PKG_CLASSPATH//:/ } ; do
-		to="$(dirname ${jar})/lib$(basename ${jar}).so"
+		to="$(dirname ${jar})/../$(get_libdir)/lib$(basename ${jar}).so"
 		if [[ ( -f "${jar}" ) && ( ".jar" == "${jar: -4:4}" ) && ( -f "${to}" ) ]] ; then
 			einfo "library: ${to}"
 			${DBTOOL} -a ${JAVA_PKG_NATIVE_CLASSMAP} ${jar} ${to} \
