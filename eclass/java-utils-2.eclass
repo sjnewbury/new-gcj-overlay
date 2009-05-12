@@ -23,7 +23,7 @@
 #
 # -----------------------------------------------------------------------------
 
-inherit eutils flag-o-matic check-reqs versionator multilib
+inherit eutils versionator multilib flag-o-matic check-reqs 
 
 IUSE="elibc_FreeBSD"
 
@@ -2675,7 +2675,7 @@ java-pkg_gcjflags() {
 	strip-flags
 	filter-flags "-ftree-loop-distribution -ftree-vectorize"
 	filter-flags "-D*"
-	replace-flags "-O?" "-O0"
+	replace-flags "-O?" "-O1"
 	append-flags -w
 
 	filter-ldflags -Wl,--as-needed --as-needed
@@ -2874,9 +2874,6 @@ java-pkg_native-set-env() {
 	local gccbin="$(gcc-config -B ${gcc_profile})"
 	# TODO: it's probably worth getting cross compiling working...
 	#CTARGET="${CTARGET:-${CHOST}}"
-	local libarch="${ARCH}"
-	[ ${ARCH} == x86 ] && libarch="i386"
-	[ ${ARCH} == x86_64 ] && libarch="amd64"
 	# Construct the gcj-jdk JAVA_HOME in the same way as the gcj-jdk
 	# ebuild just in case it's not installed yet
 	gcc_branch_ver="$(get_version_component_range 1-2 ${gcc_profile/$CHOST-})"
@@ -2889,11 +2886,8 @@ java-pkg_native-set-env() {
 	# Construct the gcj-jdk JAVA_HOME in the same way as the gcj-jdk
 	# ebuild just in case it's not installed yet
 	gcj_java_home="/usr/$(get_libdir)/gcj-jdk-${gcc_slot}-${libgcj_abi_version}"
-	# Create the directory if it doesn't already exist
-	[[ -d "${gcj_java_home}" ]] || mkdir -p "${gcj_java_home}"
-	# The ABI for libgcj must match the native binary/library
-	JAVA_PKG_NATIVE_CLASSMAP="/usr/share/java/classmap.gcjdb.${libgcj_abi_version}"
-	JAVA_PKG_NATIVE_BIN_FLAGS="-Wl,-rpath ${gcj_java_home}/lib/${libarch} -Wl,-Bsymbolic -findirect-dispatch -fjni"
+	[[ -d "${gcj_java_home}" ]] || die "dev-java/gcj-jdk-${gcc_slot} is needed to compile native packages with gcj"
+	JAVA_PKG_NATIVE_BIN_FLAGS="-Wl,-rpath ${gcj_java_home}/lib/${ABI} -Wl,-Bsymbolic -findirect-dispatch -fjni"
 
 	export GCJ="${gccbin}/gcj"
 	export DBTOOL="${gccbin}/gcj-dbtool"
@@ -2925,15 +2919,15 @@ java-pkg_native_init_() {
 
 	# Is the current system VM gcj-jdk?  Is GCJ available?
 	# If so, use the gcc-config profile for that gcj-jdk
-	einfo "Checking current java-config system VM profile..."
+	#einfo "Checking current java-config system VM profile..."
 	gcc_profile=$(java-pkg_native-select-current-jdk-gcj)
 	# If not, find a suitable version
 	if [[ "${?}" != "0" ]]; then
-			einfo "Unable to match a gcc-config profile to current java-config system VM"
-			einfo "Attempting to determine suitable gcc-config profile for this system..."
+			#einfo "Unable to match a gcc-config profile to current java-config system VM"
+			#einfo "Attempting to determine suitable gcc-config profile for this system..."
 			gcc_profile=$(java-pkg_native-find-supported-gcj)
 	else
-			einfo "System VM is gcj-jdk. Using selected profile! ;-)"
+			einfo "System Java VM is gcj-jdk. Using selected profile."
 	fi
 	if [[ "${?}" != "0" ]]; then
 		# Do we want to die here?
@@ -3166,16 +3160,12 @@ java-pkg_cachejar_() {
 		fi
 	done
 }
-
 # ------------------------------------------------------------------------------
-# @internal-function java-pkg_reg-cachejar_
+# @internal-function java-pkg_do_reg-cachejar_
 #
-# Register native library
+# Register native library for each ABI
 # ------------------------------------------------------------------------------
-java-pkg_reg-cachejar_() {
-	java-pkg_native_init_ || return 0
-	[ -z "${JAVA_PKG_CLASSPATH}" ] && return 0
-
+java-pkg_do_reg-cachejar_() {
 	# Create new database?
 	if [ ! -e "${JAVA_PKG_NATIVE_CLASSMAP}" ] ; then
 		einfo "Create new database ..."
@@ -3195,6 +3185,39 @@ java-pkg_reg-cachejar_() {
 				|| die "failed to register jar file"
 		fi
 	done
+}
+
+# ------------------------------------------------------------------------------
+# @internal-function java-pkg_reg-cachejar_
+#
+# Register native library
+# ------------------------------------------------------------------------------
+java-pkg_reg-cachejar_() {
+	java-pkg_native_init_ || return 0
+	[ -z "${JAVA_PKG_CLASSPATH}" ] && return 0
+
+	# For each ABI:
+	local abilist=""
+	local libgcj_abi_version="$(java-pkg_native-tc-abi ${gcc_profile})"
+	if has_multilib_profile ; then
+		abilist=$(get_install_abis)
+	fi
+	if [[ -n ${abilist} ]] ; then
+		OABI=${ABI}
+		for ABI in ${abilist} ; do
+			export ABI
+			# The ABI for libgcj must match the native binary/library
+			JAVA_PKG_NATIVE_CLASSMAP="/usr/share/java/gcj/${ABI}/${libgcj_abi_version}/classmap.db"
+			java-pkg_do_reg-cachejar_
+		done
+		ABI=${OABI}
+		unset OABI
+		return 0
+	else
+		JAVA_PKG_NATIVE_CLASSMAP="/usr/share/java/gcj/${libgcj_abi_version}/classmap.db"
+		java-pkg_do_reg-cachejar_
+	fi
+
 }
 
 # ------------------------------------------------------------------------------

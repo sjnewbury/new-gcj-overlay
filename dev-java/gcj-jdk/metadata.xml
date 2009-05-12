@@ -3,8 +3,8 @@
 <pkgmetadata>
 <herd>java</herd>
 <maintainer>
-  <email>gnu_andrew@member.fsf.org</email>
-  <name>Andrew John Hughes</name>
+  <email>steve@snewbury.org.uk</email>
+  <name>Steven Newbury</name>
 </maintainer>
 <longdescription>This provides a JDK wrapper for GCJ, in the style of gcj-java-compat in other distributions.</longdescription>
 </pkgmetadata>
