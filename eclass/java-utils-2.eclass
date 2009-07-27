@@ -6,7 +6,7 @@
 #
 # Licensed under the GNU General Public License, v2
 #
-# $Header: /var/cvsroot/gentoo-x86/eclass/java-utils-2.eclass,v 1.126 2009/03/31 19:19:20 betelgeuse Exp $
+# $Header: /var/cvsroot/gentoo-x86/eclass/java-utils-2.eclass,v 1.129 2009/06/07 08:22:42 ali_bush Exp $
 
 # -----------------------------------------------------------------------------
 # @eclass-begin
@@ -23,7 +23,7 @@
 #
 # -----------------------------------------------------------------------------
 
-inherit eutils versionator multilib flag-o-matic check-reqs 
+inherit eutils versionator flag-o-matic check-reqs multilib
 
 IUSE="elibc_FreeBSD"
 
@@ -498,10 +498,9 @@ java-pkg_addcp() {
 java-pkg_doso() {
 	debug-print-function ${FUNCNAME} $*
 
-	[[ ${#} -lt 1 ]] &&  "At least one argument required for ${FUNCNAME}"
 	java-pkg_check-phase install
 
-	[[ ${#} -lt 1 ]] &&  die "At least one argument required for ${FUNCNAME}"
+	[[ ${#} -lt 1 ]] && die "${FUNCNAME} requires at least one argument"
 
 	java-pkg_init_paths_
 
@@ -519,10 +518,8 @@ java-pkg_doso() {
 				debug-print "Installing ${lib} to ${JAVA_PKG_LIBDEST}"
 			# otherwise make a symlink to the symlink's origin
 			else
-				# TODO use dosym
-				ln -s "$(readlink "${lib}")" \
-					"${D}${JAVA_PKG_LIBDEST}/$(basename "${lib}")"
-				debug-print "${lib} is a symlink, linking accordanly"
+				dosym "$(readlink "${lib}")" "${JAVA_PKG_LIBDEST}/${lib##*/}"
+				debug-print "${lib} is a symlink, linking accordantly"
 			fi
 		# otherwise die
 		else
@@ -548,7 +545,7 @@ java-pkg_regso() {
 
 	java-pkg_check-phase install
 
-	[[ ${#} -lt 1 ]] &&  "at least one argument needed"
+	[[ ${#} -lt 1 ]] && die "${FUNCNAME} requires at least one argument"
 
 	java-pkg_init_paths_
 
@@ -943,6 +940,7 @@ java-pkg_jar-from() {
 	local destdir="."
 	local deep=""
 	local virtual=""
+	local record_jar=""
 
 	[[ "${EBUILD_PHASE}" == "test" ]] && build_only="build"
 
@@ -987,7 +985,7 @@ java-pkg_jar-from() {
 			[[ -z "${build_only}" ]] && java-pkg_record-jar_ "${pkg}"
 		done
 		# setting this disables further record-jar_ calls later
-		build_only="build"
+		record_jar="true"
 	else
 		java-pkg_ensure-dep "${build_only}" "${target_pkg}"
 	fi
@@ -997,7 +995,7 @@ java-pkg_jar-from() {
 	if [[ -z "${build_only}" && -n "${virtual}" ]]; then
 		java-pkg_record-jar_ "${target_pkg}"
 		# setting this disables further record-jars_ calls later
-		build_only="build"
+		record_jar="true"
 	fi
 
 	pushd ${destdir} > /dev/null \
@@ -1015,13 +1013,25 @@ java-pkg_jar-from() {
 			[[ -f "${target_jar}" ]]  && rm "${target_jar}"
 			ln -snf "${jar}" \
 				|| die "Failed to make symlink from ${jar} to ${jar_name}"
-			[[ -z "${build_only}" ]] && java-pkg_record-jar_ "${target_pkg}" "${jar}"
-		# otherwise, if the current jar is the target jar, link it
+			if [[ -z "${record_jar}" ]]; then
+				if [[ -z "${build_only}" ]]; then
+					java-pkg_record-jar_ "${target_pkg}" "${jar}"
+				else
+					java-pkg_record-jar_ --build-only "${target_pkg}" "${jar}"
+				fi
+			fi
+			# otherwise, if the current jar is the target jar, link it
 		elif [[ "${jar_name}" == "${target_jar}" ]] ; then
 			[[ -f "${destjar}" ]]  && rm "${destjar}"
 			ln -snf "${jar}" "${destjar}" \
 				|| die "Failed to make symlink from ${jar} to ${destjar}"
-			[[ -z "${build_only}" ]] && java-pkg_record-jar_ "${target_pkg}" "${jar}"
+			if [[ -z "${record_jar}" ]]; then
+				if [[ -z "${build_only}" ]]; then
+					java-pkg_record-jar_ "${target_pkg}" "${jar}"
+				else
+					java-pkg_record-jar_ --build-only "${target_jar}" "${jar}"
+				fi
+			fi
 			popd > /dev/null
 			return 0
 		fi
@@ -1104,12 +1114,13 @@ java-pkg_getjars() {
 		java-pkg_ensure-dep "${build_only}" "${pkg}"
 	done
 
-	# Only record jars that aren't build-only
-	if [[ -z "${build_only}" ]]; then
-		for pkg in ${pkgs//,/ }; do
+	for pkg in ${pkgs//,/ }; do
+		if [[ -z "${build_only}" ]]; then
 			java-pkg_record-jar_ "${pkg}"
-		done
-	fi
+		else
+			java-pkg_record-jar_ --build-only "${pkg}"
+		fi
+	done
 
 	echo "${jars}"
 }
@@ -1140,6 +1151,7 @@ java-pkg_getjar() {
 
 	local build_only=""
 	local virtual=""
+	local record_jar=""
 
 	[[ "${EBUILD_PHASE}" == "test" ]] && build_only="build"
 
@@ -1175,8 +1187,12 @@ java-pkg_getjar() {
 	# Record the package(Virtual) as a dependency and then set build_only
 	# So that individual jars are not recorded.
 	if [[ -n "${virtual}" ]]; then
-		java-pkg_record-jar_ "${pkg}"
-		build_only="true"
+		if [[ -z "${build_only}" ]]; then
+			java-pkg_record-jar_ "${pkg}"
+		else
+			java-pkg_record-jar_ --build-only "${pkg}"
+		fi
+		record_jar="true"
 	fi
 
 	for jar in ${classpath//:/ }; do
@@ -1186,7 +1202,13 @@ java-pkg_getjar() {
 
 		if [[ "$(basename ${jar})" == "${target_jar}" ]] ; then
 			# Only record jars that aren't build-only
-			[[ -z "${build_only}" ]] && java-pkg_record-jar_ "${pkg}" "${jar}"
+			if [[ -z "${record_jar}" ]]; then
+				if [[ -z "${build_only}" ]]; then
+					java-pkg_record-jar_ "${pkg}" "${jar}"
+				else
+					java-pkg_record-jar_ --build-only "${pkg}" "${jar}"
+				fi
+			fi
 			echo "${jar}"
 			return 0
 		fi
@@ -2389,6 +2411,8 @@ java-pkg_do_write_() {
 			echo "DESCRIPTION=\"${DESCRIPTION}\""
 			echo "GENERATION=\"2\""
 			echo "SLOT=\"${SLOT}\""
+			echo "CATEGORY=\"${CATEGORY}\""
+			echo "PVR=\"${PVR}\""
 
 			[[ -n "${JAVA_PKG_CLASSPATH}" ]] && echo "CLASSPATH=\"${JAVA_PKG_CLASSPATH}\""
 			[[ -n "${JAVA_PKG_LIBRARY}" ]] && echo "LIBRARY_PATH=\"${JAVA_PKG_LIBRARY}\""
@@ -2398,6 +2422,8 @@ java-pkg_do_write_() {
 			[[ -f "${JAVA_PKG_OPTIONAL_DEPEND_FILE}" ]] \
 				&& echo "OPTIONAL_DEPEND=\"$(cat "${JAVA_PKG_OPTIONAL_DEPEND_FILE}" | uniq | tr '\n' ':')\""
 			echo "VM=\"$(echo ${RDEPEND} ${DEPEND} | sed -e 's/ /\n/g' | sed -n -e '/virtual\/\(jre\|jdk\)/ { p;q }')\"" # TODO cleanup !
+			[[ -f "${JAVA_PKG_BUILD_DEPEND_FILE}" ]] \
+				&& echo "BUILD_DEPEND=\"$(cat "${JAVA_PKG_BUILD_DEPEND_FILE}" | uniq | tr '\n' ':')\""
 		) > "${JAVA_PKG_ENV}"
 
 		# register target/source
@@ -2440,20 +2466,22 @@ java-pkg_do_write_() {
 #
 # Record an (optional) dependency to the package.env
 # @param --optional - record dependency as optional
+# @param --build - record dependency as build_only
 # @param $1 - package to record
 # @param $2 - (optional) jar of package to record
 # ------------------------------------------------------------------------------
 JAVA_PKG_DEPEND_FILE="${T}/java-pkg-depend"
 JAVA_PKG_OPTIONAL_DEPEND_FILE="${T}/java-pkg-optional-depend"
+JAVA_PKG_BUILD_DEPEND_FILE="${T}/java-pkg-build-depend"
 
 java-pkg_record-jar_() {
 	debug-print-function ${FUNCNAME} $*
 
 	local depend_file="${JAVA_PKG_DEPEND_FILE}"
-	if [[ "${1}" == "--optional" ]]; then
-		depend_file="${JAVA_PKG_OPTIONAL_DEPEND_FILE}"
-		shift
-	fi
+	case "${1}" in
+		"--optional") depend_file="${JAVA_PKG_OPTIONAL_DEPEND_FILE}"; shift;;
+		"--build-only") depend_file="${JAVA_PKG_BUILD_DEPEND_FILE}"; shift;;
+	esac
 
 	local pkg=${1} jar=${2} append
 	if [[ -z "${jar}" ]]; then
@@ -2610,16 +2638,11 @@ java-pkg_switch-vm() {
 			export GENTOO_VM="${JAVA_PKG_FORCE_VM}"
 		# if we're allowed to switch the vm...
 		elif [[ "${JAVA_PKG_ALLOW_VM_CHANGE}" == "yes" ]]; then
-			debug-print "depend-java-query:  NV_DEPEND:	${JAVA_PKG_NV_DEPEND:-${DEPEND}} VNEED: ${JAVA_PKG_VNEED}"
-			if [[ -n ${JAVA_PKG_VNEED} ]]; then
-				GENTOO_VM="$(depend-java-query --need-virtual "${JAVA_PKG_VNEED}" --get-vm "${JAVA_PKG_NV_DEPEND:-${DEPEND}}")"
-			else
-				GENTOO_VM="$(depend-java-query --get-vm "${JAVA_PKG_NV_DEPEND:-${DEPEND}}")"
-			fi
+			debug-print "depend-java-query:  NV_DEPEND:	${JAVA_PKG_NV_DEPEND:-${DEPEND}}"
+			GENTOO_VM="$(depend-java-query --get-vm "${JAVA_PKG_NV_DEPEND:-${DEPEND}}")"
 			if [[ -z "${GENTOO_VM}" || "${GENTOO_VM}" == "None" ]]; then
 				eerror "Unable to determine VM for building from dependencies:"
 				echo "NV_DEPEND: ${JAVA_PKG_NV_DEPEND:-${DEPEND}}"
-				echo "VNEED: ${JAVA_PKG_VNEED}"
 				die "Failed to determine VM for building."
 			else
 				export GENTOO_VM
@@ -2647,7 +2670,7 @@ java-pkg_switch-vm() {
 		export JDK_HOME=${JAVA_HOME}
 
 		# Setup GCJ environment for packages that use gcj directly
-		java-pkg_native_init_ 1
+		java-pkg_native_init_
 
 		#TODO If you know a better solution let us know.
 		java-pkg_append_ LD_LIBRARY_PATH "$(java-config -g LDPATH)"
@@ -2863,6 +2886,7 @@ java-pkg_native-select-current-jdk-gcj() {
 # @param $1 - gcc gcj profile
 # ------------------------------------------------------------------------------
 java-pkg_native-set-env() {
+	# TODO: check cross compiling is working...
 	local gcj_java_home gcc_branch_ver gcc_config_ver gcc_slot
 	local gcc_profile="${1}"
 
@@ -2872,21 +2896,20 @@ java-pkg_native-set-env() {
 	fi
 	local libgcj_abi_version="$(java-pkg_native-tc-abi ${gcc_profile})"
 	local gccbin="$(gcc-config -B ${gcc_profile})"
-	# TODO: it's probably worth getting cross compiling working...
-	#CTARGET="${CTARGET:-${CHOST}}"
+	local gcj_target="$($gccbin/gcj -dumpmachine)"
+	[[ -z gcc_target ]] && die "gcj binary missing for ${gcc_profile}"
+
 	# Construct the gcj-jdk JAVA_HOME in the same way as the gcj-jdk
 	# ebuild just in case it's not installed yet
-	gcc_branch_ver="$(get_version_component_range 1-2 ${gcc_profile/$CHOST-})"
-	gcc_config_ver="${gcc_config_ver:-$(replace_version_separator 3 '-' ${gcc_profile/$CHOST-})}"
+	gcc_branch_ver="$(get_version_component_range 1-2 ${gcc_profile/$gcj_target-})"
+	gcc_config_ver="${gcc_config_ver:-$(replace_version_separator 3 '-' ${gcc_profile/$gcj_target-})}"
 	if use multislot ; then
-		gcc_slot="${CHOST}-${gcc_config_ver}"
+		gcc_slot="${gcj_target}-${gcc_config_ver}"
 	else
 		gcc_slot="${gcc_branch_ver}"
 	fi
-	# Construct the gcj-jdk JAVA_HOME in the same way as the gcj-jdk
-	# ebuild just in case it's not installed yet
 	gcj_java_home="/usr/$(get_libdir)/gcj-jdk-${gcc_slot}-${libgcj_abi_version}"
-	[[ -d "${gcj_java_home}" ]] || die "dev-java/gcj-jdk-${gcc_slot} is needed to compile native packages with gcj"
+	[[ -d "${gcj_java_home}" ]] || die "dev-java/gcj-jdk-${gcc_config_ver} needs to be installed to compile native packages with gcj"
 	JAVA_PKG_NATIVE_BIN_FLAGS="-Wl,-rpath ${gcj_java_home}/lib/${ABI} -Wl,-Bsymbolic -findirect-dispatch -fjni"
 
 	export GCJ="${gccbin}/gcj"
@@ -2900,7 +2923,6 @@ java-pkg_native-set-env() {
 #
 # Check for issues
 #
-# @param $1 - flag to skip filter gcjflags if set
 # @return 0 - procede with native build
 # @return 1 - skip native build
 # ------------------------------------------------------------------------------
@@ -2919,12 +2941,12 @@ java-pkg_native_init_() {
 
 	# Is the current system VM gcj-jdk?  Is GCJ available?
 	# If so, use the gcc-config profile for that gcj-jdk
-	#einfo "Checking current java-config system VM profile..."
+	#einfo "Checking current java-config system VM profile ..."
 	gcc_profile=$(java-pkg_native-select-current-jdk-gcj)
 	# If not, find a suitable version
 	if [[ "${?}" != "0" ]]; then
 			#einfo "Unable to match a gcc-config profile to current java-config system VM"
-			#einfo "Attempting to determine suitable gcc-config profile for this system..."
+			#einfo "Attempting to determine suitable gcc-config profile for this system ..."
 			gcc_profile=$(java-pkg_native-find-supported-gcj)
 	else
 			einfo "System Java VM is gcj-jdk. Using selected profile."
@@ -2933,14 +2955,11 @@ java-pkg_native_init_() {
 		# Do we want to die here?
 		ewarn "java native tools unusable!"
 		return 1
-	else
-		einfo "Java native build enabled! ;-)"
 	fi
 
-	einfo "Using gcc-config profile: ${gcc_profile} to build native pkg..."
+	einfo "Using gcc-config profile: ${gcc_profile} to build native pkg ..."
 
 	java-pkg_native-set-env ${gcc_profile}
-	[[ -n ${skip_cflags} ]] || java-pkg_gcjflags
 
 	return 0
 }
@@ -2957,6 +2976,8 @@ java-pkg_native_init_() {
 # ------------------------------------------------------------------------------
 java-pkg_gen-native-cp() {
 	java-pkg_native_init_ || return 0
+
+	java-pkg_gcjflags
 
 	local pkg cp item lib
 	for pkg in ${@} ; do
@@ -2985,6 +3006,9 @@ java-pkg_gen-native-cp() {
 # ------------------------------------------------------------------------------
 java-pkg_donative() {
 	java-pkg_native_init_ || return 0
+
+	java-pkg_gcjflags
+
 	einfo "Compile Java source to native ..."
 
 	local buildpath="${S}/build/native"
@@ -3035,6 +3059,9 @@ java-pkg_donative() {
 # ------------------------------------------------------------------------------
 java-pkg_donative-bin() {
 	java-pkg_native_init_ || return 0
+
+	java-pkg_gcjflags
+
 	[ -z "${1}" ] && die "set the main function to call for the binary!"
 
 	if [ ".jar" == "${2: -4:4}" ] ; then
@@ -3091,6 +3118,8 @@ java-pkg_donative-bin() {
 java-pkg_skip-cachejar() {
 	java-pkg_native_init_ || return 0
 
+	java-pkg_gcjflags
+
 	if [[ ${1} =~ ^[0-9]+$ ]] ; then
 		CHECKREQS_MEMORY="${1}"
 		check_reqs_conditional && return 0
@@ -3113,6 +3142,9 @@ java-pkg_skip-cachejar() {
 # ------------------------------------------------------------------------------
 java-pkg_cachejar() {
 	java-pkg_native_init_ || return 0
+
+	java-pkg_gcjflags
+
 	pushd "${D}" >/dev/null || die "This function is for src_install!"
 
 	local jars jar
@@ -3132,6 +3164,8 @@ java-pkg_cachejar() {
 # ------------------------------------------------------------------------------
 java-pkg_cachejar_() {
 	java-pkg_native_init_ || return 0
+
+	java-pkg_gcjflags
 
 	local jars
 	[ ${#} -lt 1 ] \
@@ -3194,6 +3228,9 @@ java-pkg_do_reg-cachejar_() {
 # ------------------------------------------------------------------------------
 java-pkg_reg-cachejar_() {
 	java-pkg_native_init_ || return 0
+
+	java-pkg_gcjflags
+
 	[ -z "${JAVA_PKG_CLASSPATH}" ] && return 0
 
 	# For each ABI:
